@@ -1,121 +1,88 @@
-# Fitverso — Arquitetura do Pipeline
+# Fitverso — Arquitetura e Plano de Ataque
 
-> Conceito: loop fechado de fitness em tempo real
-> Captura → Comparação → Correção → Repetição
-> Data: 2026-10-25
+**Status:** 2026-10-25 | Repo: maxteel122343/fitverso
 
----
+## Visão
 
-## 1. Visão Geral
+Mundo virtual compartilhado onde vários usuários fazem exercícios em tempo real. Câmera captura o movimento, esqueleto 3D aparece no avatar, IA personalizada guia os exercícios do dataset e compara a execução com referência — feedback de "fez certo / fez errado" no loop.
 
-O usuário faz movimentos fitness na frente da câmera do celular.
-O sistema captura em tempo real, renderiza um esqueleto 3D no mundo virtual,
-a IA guia os exercícios (via dataset) e dá feedback se o movimento está certo ou errado.
+Diferencial vs Peloton/Mirror: presença social, competição e accountability em grupo. Apps individuais com tela bonita; Fitverso é um espaço social.
 
-**Três peças centrais:**
-1. **Câmera** → captura de vídeo
-2. **Esqueleto 3D** → pose estimation em tempo real
-3. **Dataset de exercícios** → fonte de verdade (1324 exercícios, 10 idiomas)
+## Ordem de Ataque (nova estratégia)
 
----
+### Fase 1 — Validar a base de pose (AGORA)
+**[Good-GYM](https://github.com/maxteel122343/Good-GYM)** (fork de yo-WASSUP/Good-GYM)
+- RTMPose via rtmlib, roda em **CPU** (sem GPU)
+- Contagem de reps automática, 11 exercícios (agachamento, flexão, abdominal, rosca, elevação lateral, etc.)
+- Visualização de esqueleto + medição de ângulos + correção de postura
+- PyQt5, ONNX Runtime, MIT license
+- **Dia 1:** instalar, abrir webcam, medir latência frame→keypoint. Meta: < 100 ms.
 
-## 2. Repositórios do Kit
+### Fase 2 — Plano B de pose
+**[Pose-Comparison](https://github.com/maxteel122343/Pose-Comparison)** (fork de TodayAnalyze/Pose-Comparison)
+- Três pipelines lado a lado: MediaPipe, YOLOv11, OpenPose
+- Mesmo código de contagem e correção guiada pra cada um
+- Usar se RTMPose não entregar latência ou precisão no Fitverso
 
-| Repo | Papel no Fitverso | Fork |
-|------|------------------|------|
-| `trt_pose` (NVIDIA-AI-IOT) | Pose 2D em tempo real, leve, TensorRT | maxteel122343/trt_pose |
-| `GEM-X` (NVlabs) | Pose 3D de qualidade para o avatar virtual | maxteel122343/GEM-X |
-| `exercises-dataset` (hasaneyldrm) | 1324 exercícios: GIFs, categorias, grupos musculares, instruções em 10 idiomas, MIT | maxteel122343/exercises-dataset |
-| `soma-retargeter` (NVIDIA) | Retargeting de esqueleto humano → articulações de robô/avatar | (avaliar) |
-| `openGym` (DuarteSantos8) | Referência de UX: tracker self-hosted, guided workouts animados | maxteel122343/openGym |
-| `blosm` (vvoovv) | Importar cidades 3D (Google Tiles + OSM) pro mundo virtual | maxteel122343/blosm |
-| `SuperSplat` (PlayCanvas) | Renderização de splat 3D em tempo real | maxteel122343/supersplat |
-| `3d-model-anything` | Geração/edição de modelos 3D | maxteel122343/3d-model-anything |
+### Fase 3 — Camada de comparação com coach (diferencial)
+**[MemryX_eXamples](https://github.com/maxteel122343/MemryX_eXamples)** → `fun_projects/fitness_mirror_yolov8/`
+- YOLOv8m-Pose + **Dynamic Time Warping (DTW)** comparando movimento ao vivo vs vídeo do coach
+- Score de similaridade em tempo real + contagem com histerese
+- É a peça que transforma "contar reps" em "avaliar forma" — o cérebro do Fitverso
 
----
+## Kit Completo (repos anteriores, papéis mantidos)
 
-## 3. Pipeline (Etapas + Latência Estimada)
+| Repo | Papel | Quando entra |
+|------|-------|--------------|
+| trt_pose | Pose 2D tempo real (TensorRT/Jetson) | Se Good-GYM for lento em hardware fraco |
+| GEM-X | Pose 3D de qualidade (SOMA) | Renderizar avatar no mundo virtual |
+| soma-retargeter | Humano→robô retargeting | Animar personagem 3D copiando o usuário |
+| blosm | Google 3D Tiles + OSM + terreno | Mundo virtual com cidade real (Tourverse) |
+| exercises-dataset | 1324 exercícios, GIFs, 10 idiomas | Fonte de verdade dos movimentos |
+| SuperSplat | Splat 3D em tempo real | Render leve pra PWA |
+| openGym | UX de referência | Guiado animado self-hosted |
+| 3d-model-anything | Geração/edição 3D | Assets do mundo virtual |
+
+## Pipeline com latência estimada
+
+1. Webcam → frame: ~16 ms (60 fps)
+2. RTMPose inferência (CPU): ~30–60 ms
+3. Cálculo de ângulos + contagem: ~5 ms
+4. Render esqueleto: ~10 ms
+5. **Total: ~60–90 ms** — dentro da meta de 100 ms
+
+Acima de 200 ms a sensação de espelho quebra.
+
+## Prompt pro GitHub Copilot (primeiro protótipo)
 
 ```
-[Câmera do celular]
-    ↓ ~16ms (60fps)
-[trt_pose] → keypoints 2D
-    ↓ ~10-20ms (TensorRT no Jetson/GPU)
-[GEM-X] → pose 3D (SOMA)
-    ↓ ~30-50ms
-[Camada de Integração] ← AQUI É ONDE TUDO PODE MORRER
-    ↓ ~5-10ms
-[Comparação com exercício de referência (exercises-dataset)]
-    ↓ ~10-20ms
-[IA personalizada] → feedback + próximo exercício
-    ↓ ~50-100ms (LLM/API)
-[Render do avatar no mundo virtual (SuperSplat/PlayCanvas)]
-    ↓ ~16ms
-[Tela do usuário]
+Cria um protótipo Python minimal do Fitverso usando o código do Good-GYM como base.
+
+Requisitos:
+1. Abre a webcam e roda RTMPose (via rtmlib) em tempo real
+2. Desenha o esqueleto 17 keypoints COCO sobre o frame com OpenCV
+3. Implementa contagem de reps de AGACHAMENTO usando os keypoints hip-knee-ankle
+   (histerese: conta 1 rep quando o joelho passa de 90° pra cima e volta)
+4. Mede e imprime no terminal a latência de cada frame: captura → keypoint → render
+5. Mostra um contador de reps na tela
+6. Estrutura de pastas limpa: src/pose.py, src/counters.py, src/main.py
+7. requirements.txt com rtmlib, opencv-python, numpy
+8. README com instruções de instalação e como rodar
+
+Não adiciona GUI PyQt5 — só OpenCV. Foco em latência medida e código legível.
 ```
 
-**Latência total estimada: ~140-230ms**
+## Próximos Passos
 
-- Abaixo de 100ms → sensação de espelho perfeita
-- 100-200ms → aceitável, ainda parece responsivo
-- Acima de 200ms → quebra a imersão
+1. Rodar Good-GYM, medir latência real
+2. Se < 100 ms: plugar dataset de exercícios
+3. Se > 100 ms: testar MediaPipe do Pose-Comparison
+4. Estudar o DTW do MemryX pra camada de score
+5. Integrar com Tourverse quando a base de pose estiver estável
 
-**Gargalo provável #1:** a chamada da IA personalizada (se for LLM remoto).
-**Gargalo provável #2:** GEM-X em dispositivos móveis sem GPU dedicada.
+## Decisões em Aberto
 
----
-
-## 4. A Camada de Integração (o trabalho real)
-
-Cada repo tem:
-- Linguagem diferente (Python, C++, TypeScript)
-- Formato de dados diferente (JSON, BVH, CSV, tensors)
-- Dependências diferentes
-
-A ponte precisa:
-1. Normalizar os keypoints do trt_pose pro formato SOMA do GEM-X
-2. Mapear os 1324 exercícios do dataset pra representação de pose de referência
-3. Calcular distância/similaridade entre pose do usuário e pose de referência
-4. Gerar feedback acionável (não só "errado", mas "joelhos mais pra frente")
-5. Decidir o próximo exercício com base no desempenho
-
-**Sugestão:** essa camada em TypeScript/React (alinha com o stack do Tourverse),
-rodando como serviço separado que os outros componentes chamam via API local.
-
----
-
-## 5. Mundo Virtual
-
-Duas abordagens:
-- **SuperSplat/PlayCanvas:** splat 3D em tempo real, leve, bom pra PWA
-- **blosm + Blender:** cidades 3D georreferenciadas (mais pesado, melhor qualidade)
-
-Pro MVP do Fitverso, SuperSplat parece o caminho: o foco é o esqueleto e o feedback,
-não a cidade. A cidade vira diferencial na v2.
-
----
-
-## 6. Próximos Passos (ordem sugerida)
-
-1. [ ] Fazer trt_pose rodar com webcam local (teste de latência real)
-2. [ ] Fazer GEM-X processar um vídeo curto e medir tempo
-3. [ ] Estruturar o exercises-dataset num formato consultável (JSON/SQLite)
-4. [ ] Prototipar a camada de comparação (pose do usuário vs referência)
-5. [ ] Montar o loop mínimo: câmera → esqueleto → feedback texto
-6. [ ] Só depois: avatar 3D + mundo virtual + IA personalizada
-
-**Métrica do plano de 90 dias:** uma coisa verificável por dia.
-Dia 1 = trt_pose rodando com latência medida.
-
----
-
-## 7. Decisões em Aberto
-
-- [ ] IA personalizada: LLM remoto (Gemini/GPT) ou modelo local?
-- [ ] Onde roda o pipeline: no celular do usuário ou num servidor?
-- [ ] Monetização: freemium com exercícios básicos, pago com IA personalizada?
-- [ ] Fitverso é app separado ou módulo do Tourverse?
-
----
-
-*Arquivo gerado em 2026-10-25. Atualizar conforme os forks evoluírem.*
+- IA personalizada roda local ou remoto?
+- Avatar 3D: GEM-X 3D ou retargeting SOMA?
+- Mundo virtual: Blender render ou Three.js no browser?
+- Monetização: créditos, assinatura, marketplace de e-books?
